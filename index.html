@@ -2,29 +2,18 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>荒野大乱斗简单Demo</title>
+    <title>荒野大乱斗 - 圆角墙体迷宫</title>
     <style>
-        /* 页面样式：让游戏居中，背景黑色 */
-        body { 
-            margin: 0; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            height: 100vh; 
-            background: #1a1a1a; 
-            overflow: hidden;
-        }
-        /* 画布样式：设置草地背景色和边框 */
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #1a1a1a; overflow: hidden; }
         canvas { 
-            background: #90EE90; /* 类似荒野乱斗的草地绿 */
+            background: #90EE90; 
             border: 4px solid #ffffff;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            box-shadow: 0 0 30px rgba(0,0,0,0.7);
         }
     </style>
 </head>
 <body>
 
-<!-- 游戏舞台 -->
 <canvas id="gameCanvas" width="1400" height="840"></canvas>
 
 <script>
@@ -35,19 +24,33 @@
     playerImg.src = '67.png'; 
 
     const player = {
-        x: 400, y: 250,
+        x: 700, y: 420, // 初始位置放在地图中心
         width: 50, height: 50,
         speed: 5,
         walkCycle: 0,
         isMoving: false
     };
 
-    // --- 【新内容】定义墙体 ---
-    // 数组里的每一个 {} 代表一堵墙
+    // --- 【更新】更多墙体，并增加圆角半径半径 radius ---
     const walls = [
-        { x: 150, y: 100, width: 80, height: 150 }, // 左侧长墙
-        { x: 450, y: 250, width: 150, height: 80 }, // 右侧横墙
-        { x: 300, y: 50,  width: 200, height: 40 }  // 顶部窄墙
+        // 四周的围墙感
+        { x: 100, y: 100, width: 80, height: 300, radius: 15 },
+        { x: 100, y: 500, width: 80, height: 240, radius: 15 },
+        { x: 1220, y: 100, width: 80, height: 640, radius: 15 },
+        
+        // 中间乱斗区的“厚墙”
+        { x: 300, y: 200, width: 200, height: 100, radius: 20 },
+        { x: 300, y: 540, width: 200, height: 100, radius: 20 },
+        { x: 900, y: 200, width: 200, height: 100, radius: 20 },
+        { x: 900, y: 540, width: 200, height: 100, radius: 20 },
+        
+        // 中心核心墙
+        { x: 650, y: 320, width: 100, height: 200, radius: 25 },
+        
+        // 零散的小掩体
+        { x: 600, y: 100, width: 200, height: 50, radius: 10 },
+        { x: 600, y: 690, width: 200, height: 50, radius: 10 },
+        { x: 1050, y: 400, width: 50, height: 50, radius: 10 }
     ];
 
     const keys = {};
@@ -55,27 +58,30 @@
     window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
     function update() {
-        // 先记录移动前的位置，如果撞墙了就退回这里
         let oldX = player.x;
         let oldY = player.y;
         player.isMoving = false;
 
+        // 移动逻辑
         if (keys['w'] || keys['arrowup']) { player.y -= player.speed; player.isMoving = true; }
         if (keys['s'] || keys['arrowdown']) { player.y += player.speed; player.isMoving = true; }
         if (keys['a'] || keys['arrowleft']) { player.x -= player.speed; player.isMoving = true; }
         if (keys['d'] || keys['arrowright']) { player.x += player.speed; player.isMoving = true; }
 
-        // --- 【新内容】碰撞检测逻辑 ---
+        // 碰撞检测
         for (let wall of walls) {
             if (player.x < wall.x + wall.width &&
                 player.x + player.width > wall.x &&
                 player.y < wall.y + wall.height &&
                 player.y + player.height > wall.y) {
-                // 发现重叠，强制退回到旧位置
                 player.x = oldX;
                 player.y = oldY;
             }
         }
+
+        // 边界限制
+        player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
+        player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
 
         if (player.isMoving) {
             player.walkCycle += 0.2; 
@@ -87,14 +93,17 @@
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height); 
 
-        // --- 【新内容】绘制深灰色墙体 ---
-        ctx.fillStyle = "#A9A9A9"; // 深灰色
+        // --- 【核心修改】使用 roundRect 绘制圆角墙体 ---
+        ctx.fillStyle = "#A9A9A9"; // 墙体填充颜色
+        ctx.strokeStyle = "#555";  // 墙体边框颜色
+        ctx.lineWidth = 4;
+
         walls.forEach(wall => {
-            ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
-            // 给墙加个黑色边框
-            ctx.strokeStyle = "#333";
-            ctx.lineWidth = 3;
-            ctx.strokeRect(wall.x, wall.y, wall.width, wall.height);
+            ctx.beginPath();
+            // 参数：x, y, 宽, 高, 圆角半径
+            ctx.roundRect(wall.x, wall.y, wall.width, wall.height, wall.radius || 10);
+            ctx.fill();
+            ctx.stroke();
         });
 
         // 绘制阴影
@@ -107,6 +116,12 @@
         let bounce = Math.sin(player.walkCycle) * 6;
         if (playerImg.complete) {
             ctx.drawImage(playerImg, player.x, player.y + bounce, player.width, player.height);
+        } else {
+            // 如果图片 67.png 没加载成功，显示一个蓝色圆块
+            ctx.fillStyle = "blue";
+            ctx.beginPath();
+            ctx.arc(player.x + 25, player.y + 25 + bounce, 25, 0, Math.PI * 2);
+            ctx.fill();
         }
     }
 
@@ -116,7 +131,9 @@
         requestAnimationFrame(loop);
     }
 
+    // 无论图片是否加载成功，都启动游戏循环
     playerImg.onload = () => loop();
+    playerImg.onerror = () => { console.warn("图片 67.png 加载失败"); loop(); };
 </script>
 </body>
 </html>
