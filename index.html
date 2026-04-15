@@ -2,9 +2,18 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>荒野大乱斗 - 圆角墙体迷宫</title>
+    <title>荒野大乱斗 - 随机圆角墙体版</title>
     <style>
-        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #1a1a1a; overflow: hidden; }
+        body { 
+            margin: 0; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            background: #1a1a1a; 
+            overflow: hidden; 
+        }
+        /* 浅绿色草地背景 */
         canvas { 
             background: #90EE90; 
             border: 4px solid #ffffff;
@@ -20,69 +29,70 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
 
+    // --- 1. 加载图片 ---
     const playerImg = new Image(); 
-    playerImg.src = '67.png'; 
+    playerImg.src = '67.png'; // 确保你的图片名正确
 
+    // --- 2. 人物属性 ---
     const player = {
-        x: 700, y: 420, // 初始位置放在地图中心
-        width: 50, height: 50,
-        speed: 5,
+        x: 700, 
+        y: 420,
+        width: 50, 
+        height: 50,
+        speed: 6,
         walkCycle: 0,
         isMoving: false
     };
 
-    // --- 【更新】更多墙体，并增加圆角半径半径 radius ---
-    const walls = [
-        // 四周的围墙感
-        { x: 100, y: 100, width: 80, height: 300, radius: 15 },
-        { x: 100, y: 500, width: 80, height: 240, radius: 15 },
-        { x: 1220, y: 100, width: 80, height: 640, radius: 15 },
-        
-        // 中间乱斗区的“厚墙”
-        { x: 300, y: 200, width: 200, height: 100, radius: 20 },
-        { x: 300, y: 540, width: 200, height: 100, radius: 20 },
-        { x: 900, y: 200, width: 200, height: 100, radius: 20 },
-        { x: 900, y: 540, width: 200, height: 100, radius: 20 },
-        
-        // 中心核心墙
-        { x: 650, y: 320, width: 100, height: 200, radius: 25 },
-        
-        // 零散的小掩体
-        { x: 600, y: 100, width: 200, height: 50, radius: 10 },
-        { x: 600, y: 690, width: 200, height: 50, radius: 10 },
-        { x: 1050, y: 400, width: 50, height: 50, radius: 10 }
-    ];
+    // --- 3. 随机生成 12 堵圆角墙 ---
+    const walls = [];
+    function generateWalls() {
+        for (let i = 0; i < 12; i++) {
+            walls.push({
+                x: Math.random() * (canvas.width - 200) + 50,
+                y: Math.random() * (canvas.height - 200) + 50,
+                width: Math.random() * 120 + 60,  // 宽度在60-180之间
+                height: Math.random() * 120 + 60, // 高度在60-180之间
+                radius: 20 // 圆角弧度
+            });
+        }
+    }
+    generateWalls();
 
+    // --- 4. 键盘监听 ---
     const keys = {};
     window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
     window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
+    // --- 5. 逻辑更新 (包含碰撞检测) ---
     function update() {
         let oldX = player.x;
         let oldY = player.y;
         player.isMoving = false;
 
-        // 移动逻辑
+        // 移动控制
         if (keys['w'] || keys['arrowup']) { player.y -= player.speed; player.isMoving = true; }
         if (keys['s'] || keys['arrowdown']) { player.y += player.speed; player.isMoving = true; }
         if (keys['a'] || keys['arrowleft']) { player.x -= player.speed; player.isMoving = true; }
         if (keys['d'] || keys['arrowright']) { player.x += player.speed; player.isMoving = true; }
 
-        // 碰撞检测
+        // 碰撞检测：遍历 12 堵墙
         for (let wall of walls) {
             if (player.x < wall.x + wall.width &&
                 player.x + player.width > wall.x &&
                 player.y < wall.y + wall.height &&
                 player.y + player.height > wall.y) {
+                // 撞墙了，退回到上一帧的位置
                 player.x = oldX;
                 player.y = oldY;
             }
         }
 
-        // 边界限制
+        // 屏幕边界检测
         player.x = Math.max(0, Math.min(canvas.width - player.width, player.x));
         player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
 
+        // 行走动画计时
         if (player.isMoving) {
             player.walkCycle += 0.2; 
         } else {
@@ -90,50 +100,48 @@
         }
     }
 
+    // --- 6. 画面绘制 ---
     function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height); 
 
-        // --- 【核心修改】使用 roundRect 绘制圆角墙体 ---
-        ctx.fillStyle = "#A9A9A9"; // 墙体填充颜色
-        ctx.strokeStyle = "#555";  // 墙体边框颜色
+        // 绘制圆角墙体
+        ctx.fillStyle = "#A9A9A9"; // 深灰色墙
+        ctx.strokeStyle = "#555";  // 边框
         ctx.lineWidth = 4;
-
         walls.forEach(wall => {
             ctx.beginPath();
-            // 参数：x, y, 宽, 高, 圆角半径
-            ctx.roundRect(wall.x, wall.y, wall.width, wall.height, wall.radius || 10);
+            ctx.roundRect(wall.x, wall.y, wall.width, wall.height, wall.radius);
             ctx.fill();
             ctx.stroke();
         });
 
-        // 绘制阴影
+        // 绘制人物阴影
         ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
         ctx.beginPath();
         ctx.ellipse(player.x + 25, player.y + 45, 15, 7, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // 绘制人物
+        // 绘制人物 (带有上下晃动效果)
         let bounce = Math.sin(player.walkCycle) * 6;
         if (playerImg.complete) {
             ctx.drawImage(playerImg, player.x, player.y + bounce, player.width, player.height);
         } else {
-            // 如果图片 67.png 没加载成功，显示一个蓝色圆块
+            // 图片未加载时的占位符
             ctx.fillStyle = "blue";
-            ctx.beginPath();
-            ctx.arc(player.x + 25, player.y + 25 + bounce, 25, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.fillRect(player.x, player.y + bounce, player.width, player.height);
         }
     }
 
+    // --- 7. 游戏循环 ---
     function loop() {
         update();
         draw();
         requestAnimationFrame(loop);
     }
 
-    // 无论图片是否加载成功，都启动游戏循环
+    // 启动
     playerImg.onload = () => loop();
-    playerImg.onerror = () => { console.warn("图片 67.png 加载失败"); loop(); };
+    playerImg.onerror = () => loop(); // 加载失败也运行
 </script>
 </body>
 </html>
