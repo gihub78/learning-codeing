@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Brawl Stars Movement Demo</title>
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background: #222; }
+        canvas { background: #44aa44; border: 5px solid #fff; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="600" height="400"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // 1. Character Object (The "Hero")
+    const player = {
+        x: 300,
+        y: 200,
+        size: 20,
+        color: 'blue',
+        speed: 5
+    };
+
+    // 2. Track keys being pressed
+    const keys = {};
+
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    // 3. Movement Logic
+    function update() {
+        // Arrow keys or WASD
+        if (keys['ArrowUp'] || keys['w']) player.y -= player.speed;
+        if (keys['ArrowDown'] || keys['s']) player.y += player.speed;
+        if (keys['ArrowLeft'] || keys['a']) player.x -= player.speed;
+        if (keys['ArrowRight'] || keys['d']) player.x += player.speed;
+
+        // Keep player inside the screen (Collision with walls)
+        if (player.x < 0) player.x = 0;
+        if (player.y < 0) player.y = 0;
+        if (player.x > canvas.width - player.size) player.x = canvas.width - player.size;
+        if (player.y > canvas.height - player.size) player.y = canvas.height - player.size;
+    }
+
+    // 4. Drawing Logic
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear screen
+        
+        // Draw the player
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.size, player.size);
+    }
+
+    // 5. Game Loop
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    loop();
+</script>
+</body>
+</html>
