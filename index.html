@@ -2,189 +2,134 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>荒野大乱斗 - 扣篮大招 & 迷宫墙体</title>
+    <title>荒野大乱斗 - 多人对战版</title>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { margin: 0; background: #1a1a1a; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Arial', sans-serif; }
-        canvas { background: #78ab46; border: 4px solid #fff; cursor: crosshair; }
+        body { margin: 0; background: #1a1a1a; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial; }
+        canvas { background: #78ab46; border: 4px solid #fff; }
         #ui { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); pointer-events: none; }
         .bar-bg { width: 200px; height: 18px; background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 10px; overflow: hidden; }
         #superBar { width: 0%; height: 100%; background: #FFD700; transition: width 0.1s; }
-        .hint { color: white; text-align: center; margin-bottom: 8px; font-weight: bold; text-shadow: 2px 2px 2px #000; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div id="hintText" class="hint">攻击敌人充能 [E] 发动扣篮</div>
+        <div style="color:white; text-align:center; margin-bottom:5px;">按 [E] 向鼠标位置扣篮</div>
         <div class="bar-bg"><div id="superBar"></div></div>
     </div>
     <canvas id="gameCanvas" width="1000" height="600"></canvas>
 
 <script>
+const socket = io();
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const superBarEl = document.getElementById('superBar');
 
-// --- 1. 图片加载区域 ---
-const playerImg = new Image();
-playerImg.src = '1.png'; // 确保你的目录下有 1.png
-
-// --- 2. 地图与墙体配置 ---
+const playerImg = new Image(); playerImg.src = '1.png';
 const world = { width: 2000, height: 1500 };
 const camera = { x: 0, y: 0 };
 let mousePos = { x: 0, y: 0 };
+let otherPlayers = {};
+let effects = [];
 
-// 自动生成一堆墙体 (x, y, 宽, 高)
-const walls = [
-    { x: 300, y: 300, w: 200, h: 40 }, { x: 300, y: 300, w: 40, h: 200 }, // L型墙
-    { x: 800, y: 200, w: 40, h: 300 }, { x: 700, y: 460, w: 240, h: 40 },
-    { x: 1400, y: 300, w: 300, h: 40 }, { x: 1500, y: 500, w: 40, h: 300 },
-    { x: 200, y: 800, w: 300, h: 40 }, { x: 600, y: 800, w: 40, h: 400 },
-    { x: 1000, y: 900, w: 400, h: 40 }, { x: 1200, y: 700, w: 40, h: 400 },
-    { x: 1600, y: 1000, w: 200, h: 40 }, { x: 300, y: 1300, w: 600, h: 40 }
-];
-
+// 本地玩家数据
 const player = {
-    x: 1000, y: 750, z: 0, 
-    width: 50, height: 50,
-    speed: 6, superCharge: 0,
-    isJumping: false, jumpProgress: 0,
-    jumpStart: {x:0, y:0}, jumpTarget: {x:0, y:0}
+    id: null, x: 0, y: 0, z: 0, width: 50, height: 50,
+    speed: 6, superCharge: 100, // 默认给满大招方便测试
+    isJumping: false, jumpProgress: 0, jumpStart: {x:0,y:0}, jumpTarget: {x:0,y:0}
 };
 
-let targets = [
-    { x: 500, y: 400, hp: 100 }, { x: 1500, y: 400, hp: 100 },
-    { x: 500, y: 1100, hp: 100 }, { x: 1500, y: 1100, hp: 100 }
-];
+// 1. 网络事件
+socket.on('currentPlayers', (players) => {
+    Object.keys(players).forEach(id => {
+        if (id === socket.id) {
+            player.id = id;
+            player.x = players[id].x; player.y = players[id].y;
+        } else {
+            otherPlayers[id] = players[id];
+        }
+    });
+});
 
-const bullets = [];
-const effects = [];
+socket.on('newPlayer', p => { otherPlayers[p.id] = p; });
+socket.on('playerMoved', p => { if(otherPlayers[p.id]) Object.assign(otherPlayers[p.id], p); });
+socket.on('playerDisconnected', id => { delete otherPlayers[id]; });
+socket.on('enemyDunked', data => { effects.push({ x: data.x, y: data.y, life: 30 }); });
+socket.on('hpUpdate', data => { if(data.id === socket.id) console.log("我被打中了！"); });
+
+// 2. 操作
 const keys = {};
-
-// 事件监听
-window.addEventListener('keydown', e => {
+window.onkeydown = e => {
     keys[e.key.toLowerCase()] = true;
     if (e.key.toLowerCase() === 'e' && player.superCharge >= 100 && !player.isJumping) startDunk();
-});
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-window.addEventListener('mousemove', e => {
-    const rect = canvas.getBoundingClientRect();
-    mousePos.x = e.clientX - rect.left;
-    mousePos.y = e.clientY - rect.top;
-});
-window.addEventListener('mousedown', () => { if(!player.isJumping) fireBullet(); });
-
-function fireBullet() {
-    const angle = Math.atan2(mousePos.y + camera.y - (player.y + 25), mousePos.x + camera.x - (player.x + 25));
-    bullets.push({ x: player.x+25, y: player.y+25, vx: Math.cos(angle)*12, vy: Math.sin(angle)*12, life: 50 });
-}
+};
+window.onkeyup = e => keys[e.key.toLowerCase()] = false;
+canvas.onmousemove = e => {
+    const r = canvas.getBoundingClientRect();
+    mousePos.x = e.clientX - r.left; mousePos.y = e.clientY - r.top;
+};
 
 function startDunk() {
-    player.isJumping = true;
-    player.superCharge = 0;
-    player.jumpProgress = 0;
+    player.isJumping = true; player.superCharge = 0; player.jumpProgress = 0;
     player.jumpStart = { x: player.x, y: player.y };
     const tx = mousePos.x + camera.x, ty = mousePos.y + camera.y;
-    const dist = Math.min(Math.hypot(tx-player.x, ty-player.y), 450);
+    const dist = Math.min(Math.hypot(tx-player.x, ty-player.y), 400);
     const angle = Math.atan2(ty-player.y, tx-player.x);
     player.jumpTarget = { x: player.x + Math.cos(angle)*dist, y: player.y + Math.sin(angle)*dist };
 }
 
 function update() {
+    if (!player.id) return;
+    
     if (!player.isJumping) {
-        let oldX = player.x, oldY = player.y;
-        if (keys['w']) player.y -= player.speed;
-        if (keys['s']) player.y += player.speed;
-        // 墙体碰撞检测 (Y轴)
-        if (checkWall(player)) player.y = oldY;
-        
-        if (keys['a']) player.x -= player.speed;
-        if (keys['d']) player.x += player.speed;
-        // 墙体碰撞检测 (X轴)
-        if (checkWall(player)) player.x = oldX;
+        if (keys['w']) player.y -= player.speed; if (keys['s']) player.y += player.speed;
+        if (keys['a']) player.x -= player.speed; if (keys['d']) player.x += player.speed;
     } else {
-        player.jumpProgress += 0.025;
+        player.jumpProgress += 0.03;
         player.x = player.jumpStart.x + (player.jumpTarget.x - player.jumpStart.x) * player.jumpProgress;
         player.y = player.jumpStart.y + (player.jumpTarget.y - player.jumpStart.y) * player.jumpProgress;
-        player.z = 4 * 250 * player.jumpProgress * (1 - player.jumpProgress);
-        if (player.jumpProgress >= 1) { player.isJumping = false; player.z = 0; performSmash(); }
-    }
-
-    bullets.forEach((b, i) => {
-        b.x += b.vx; b.y += b.vy; b.life--;
-        // 子弹碰墙消失
-        if(checkWall({x:b.x, y:b.y, width:5, height:5})) b.life = 0;
-        targets.forEach(t => {
-            if (Math.hypot(b.x-t.x, b.y-t.y) < 30) { t.hp -= 15; player.superCharge = Math.min(100, player.superCharge + 10); b.life = 0; }
-        });
-        if (b.life <= 0) bullets.splice(i, 1);
-    });
-
-    effects.forEach((ef, i) => { ef.life--; if (ef.life <= 0) effects.splice(i, 1); });
-    camera.x = player.x - canvas.width/2;
-    camera.y = player.y - canvas.height/2;
-    superBarEl.style.width = player.superCharge + '%';
-}
-
-// 墙体碰撞逻辑函数
-function checkWall(p) {
-    return walls.some(w => p.x < w.x + w.w && p.x + 50 > w.x && p.y < w.y + w.h && p.y + 50 > w.y);
-}
-
-function performSmash() {
-    effects.push({ x: player.x + 25, y: player.y + 25, life: 30, radius: 180 });
-    targets.forEach(t => {
-        if (Math.hypot(player.x+25-t.x, player.y+25-t.y) < 180) {
-            t.hp -= 50;
-            const angle = Math.atan2(t.y-player.y, t.x-player.x);
-            t.x += Math.cos(angle)*60; t.y += Math.sin(angle)*60;
+        player.z = 4 * 200 * player.jumpProgress * (1 - player.jumpProgress);
+        if (player.jumpProgress >= 1) {
+            player.isJumping = false; player.z = 0;
+            socket.emit('dunkImpact', { x: player.x+25, y: player.y+25 });
+            effects.push({ x: player.x+25, y: player.y+25, life: 30 });
         }
-    });
+    }
+    
+    socket.emit('playerMovement', { x: player.x, y: player.y, z: player.z });
+    camera.x = player.x - canvas.width/2; camera.y = player.y - canvas.height/2;
+    superBarEl.style.width = player.superCharge + '%';
+    effects.forEach((e, i) => { e.life--; if(e.life<=0) effects.splice(i,1); });
 }
 
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
-    ctx.translate(-camera.x, -camera.y);
+    ctx.clearRect(0,0,1000,600);
+    ctx.save(); ctx.translate(-camera.x, -camera.y);
 
-    // 画墙
-    ctx.fillStyle = "#5d4037";
-    walls.forEach(w => {
-        ctx.fillRect(w.x, w.y, w.w, w.h);
-        ctx.strokeStyle = "#3e2723"; ctx.strokeRect(w.x, w.y, w.w, w.h);
+    // 画别人
+    Object.values(otherPlayers).forEach(p => {
+        ctx.fillStyle = "rgba(0,0,0,0.2)";
+        ctx.beginPath(); ctx.ellipse(p.x+25, p.y+45, 20, 10, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "red"; ctx.fillRect(p.x, p.y - p.z, 50, 50);
     });
 
-    // 画目标
-    targets.forEach(t => {
-        if (t.hp > 0) {
-            ctx.fillStyle = "#f44336"; ctx.beginPath(); ctx.arc(t.x, t.y, 25, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = 'black'; ctx.fillRect(t.x-25, t.y-40, 50, 6);
-            ctx.fillStyle = 'red'; ctx.fillRect(t.x-25, t.y-40, (t.hp/100)*50, 6);
-        }
-    });
+    // 画自己
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath(); ctx.ellipse(player.x+25, player.y+45, 20, 10, 0, 0, Math.PI*2); ctx.fill();
+    if(playerImg.complete) ctx.drawImage(playerImg, player.x, player.y - player.z, 50, 50);
+    else { ctx.fillStyle = "blue"; ctx.fillRect(player.x, player.y - player.z, 50, 50); }
 
-    // 画大招圈和子弹
-    ctx.fillStyle = "yellow"; bullets.forEach(b => { ctx.beginPath(); ctx.arc(b.x, b.y, 5, 0, Math.PI*2); ctx.fill(); });
-    effects.forEach(ef => {
-        ctx.strokeStyle = `rgba(255, 165, 0, ${ef.life/30})`; ctx.lineWidth = 10;
-        ctx.beginPath(); ctx.arc(ef.x, ef.y, (1-ef.life/30)*ef.radius, 0, Math.PI*2); ctx.stroke();
+    // 画大招特效
+    effects.forEach(e => {
+        ctx.strokeStyle = `rgba(255,165,0,${e.life/30})`; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.arc(e.x, e.y, (1-e.life/30)*150, 0, Math.PI*2); ctx.stroke();
     });
-
-    // 画玩家
-    ctx.fillStyle = "rgba(0,0,0,0.2)"; // 阴影
-    ctx.beginPath(); ctx.ellipse(player.x+25, player.y+45, 20+player.z/10, 10, 0, 0, Math.PI*2); ctx.fill();
-    
-    if (playerImg.complete) {
-        // --- 图片画在这里，y轴减去z轴高度 ---
-        ctx.drawImage(playerImg, player.x, player.y - player.z, player.width, player.height);
-    } else {
-        ctx.fillStyle = "#2196F3"; ctx.fillRect(player.x, player.y-player.z, 50, 50);
-    }
 
     ctx.restore();
 }
 
-function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
-gameLoop();
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
 </script>
 </body>
 </html>
