@@ -2,7 +2,6 @@ const express = require('express');
 const app = express();
 const http = require('http').Server(app);
 const io = require('socket.io')(http);
-const path = require('path');
 
 app.use(express.static(__dirname));
 
@@ -11,21 +10,22 @@ let players = {};
 io.on('connection', (socket) => {
     console.log('玩家连入:', socket.id);
 
-    // 1. 创建新玩家
+    // 初始化玩家数据
     players[socket.id] = {
         id: socket.id,
         x: 800 + Math.random() * 400,
         y: 600 + Math.random() * 400,
         z: 0,
         hp: 100,
-        superCharge: 0
+        superCharge: 100
     };
 
-    // 2. 告诉新玩家当前有哪些人，并告诉其他人有新人来了
+    // 同步当前所有玩家给新玩家
     socket.emit('currentPlayers', players);
+    // 广播新玩家加入
     socket.broadcast.emit('newPlayer', players[socket.id]);
 
-    // 3. 处理移动同步
+    // 处理移动
     socket.on('playerMovement', (moveData) => {
         if (players[socket.id]) {
             players[socket.id].x = moveData.x;
@@ -35,33 +35,36 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 4. 处理大招砸地（由服务器广播伤害）
+    // 处理大招砸地伤害
     socket.on('dunkImpact', (impactData) => {
-        socket.broadcast.emit('enemyDunked', {
-            x: impactData.x,
-            y: impactData.y,
-            id: socket.id
-        });
-        // 简单的伤害计算：遍历所有玩家看谁在圈内
+        socket.broadcast.emit('enemyDunked', { x: impactData.x, y: impactData.y });
+        
+        // 遍历所有玩家计算伤害
         Object.keys(players).forEach(id => {
             if (id !== socket.id) {
-                let d = Math.hypot(players[id].x - impactData.x, players[id].y - impactData.y);
-                if (d < 150) {
+                let dist = Math.hypot(players[id].x - impactData.x, players[id].y - impactData.y);
+                if (dist < 150) { // 攻击半径 150
                     players[id].hp -= 40;
-                    io.emit('hpUpdate', { id: id, hp: players[id].hp });
+                    
+                    if (players[id].hp <= 0) {
+                        // 死亡复活逻辑
+                        players[id].hp = 100;
+                        players[id].x = 800 + Math.random() * 400;
+                        players[id].y = 600 + Math.random() * 400;
+                        io.emit('playerRespawn', players[id]);
+                    } else {
+                        // 同步血量更新
+                        io.emit('hpUpdate', { id: id, hp: players[id].hp });
+                    }
                 }
             }
         });
     });
 
-    // 5. 离线处理
     socket.on('disconnect', () => {
-        console.log('玩家离开:', socket.id);
         delete players[socket.id];
         io.emit('playerDisconnected', socket.id);
     });
 });
 
-http.listen(3000, () => {
-    console.log('服务器启动成功！地址: http://localhost:3000');
-});
+http.listen(3000, () => console.log('游戏已启动: http://localhost:3000'));
