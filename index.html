@@ -2,19 +2,19 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>荒野大乱斗 - 多人对战版</title>
+    <title>荒野大乱斗 - 多人版</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { margin: 0; background: #1a1a1a; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial; }
-        canvas { background: #78ab46; border: 4px solid #fff; }
+        body { margin: 0; background: #1a1a1a; overflow: hidden; font-family: 'Arial'; }
+        canvas { background: #78ab46; display: block; border: 4px solid #fff; margin: 0 auto; }
         #ui { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); pointer-events: none; }
-        .bar-bg { width: 200px; height: 18px; background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 10px; overflow: hidden; }
-        #superBar { width: 0%; height: 100%; background: #FFD700; transition: width 0.1s; }
+        .bar-bg { width: 200px; height: 18px; background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 10px; }
+        #superBar { width: 100%; height: 100%; background: #FFD700; transition: width 0.2s; border-radius: 8px; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div style="color:white; text-align:center; margin-bottom:5px;">按 [E] 向鼠标位置扣篮</div>
+        <div style="color:white; text-align:center; margin-bottom:5px; font-weight:bold; text-shadow: 2px 2px #000;">按 [E] 键 向鼠标位置扣篮攻击</div>
         <div class="bar-bg"><div id="superBar"></div></div>
     </div>
     <canvas id="gameCanvas" width="1000" height="600"></canvas>
@@ -25,26 +25,23 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const superBarEl = document.getElementById('superBar');
 
-const playerImg = new Image(); playerImg.src = '1.png';
 const world = { width: 2000, height: 1500 };
 const camera = { x: 0, y: 0 };
 let mousePos = { x: 0, y: 0 };
 let otherPlayers = {};
 let effects = [];
 
-// 本地玩家数据
 const player = {
-    id: null, x: 0, y: 0, z: 0, width: 50, height: 50,
-    speed: 6, superCharge: 100, // 默认给满大招方便测试
-    isJumping: false, jumpProgress: 0, jumpStart: {x:0,y:0}, jumpTarget: {x:0,y:0}
+    id: null, x: 0, y: 0, z: 0, hp: 100,
+    width: 50, height: 50, speed: 6,
+    superCharge: 100, isJumping: false, jumpProgress: 0
 };
 
-// 1. 网络事件
+// --- 网络事件 ---
 socket.on('currentPlayers', (players) => {
     Object.keys(players).forEach(id => {
         if (id === socket.id) {
-            player.id = id;
-            player.x = players[id].x; player.y = players[id].y;
+            Object.assign(player, players[id]);
         } else {
             otherPlayers[id] = players[id];
         }
@@ -52,12 +49,32 @@ socket.on('currentPlayers', (players) => {
 });
 
 socket.on('newPlayer', p => { otherPlayers[p.id] = p; });
-socket.on('playerMoved', p => { if(otherPlayers[p.id]) Object.assign(otherPlayers[p.id], p); });
-socket.on('playerDisconnected', id => { delete otherPlayers[id]; });
-socket.on('enemyDunked', data => { effects.push({ x: data.x, y: data.y, life: 30 }); });
-socket.on('hpUpdate', data => { if(data.id === socket.id) console.log("我被打中了！"); });
 
-// 2. 操作
+socket.on('playerMoved', p => { 
+    if(otherPlayers[p.id]) Object.assign(otherPlayers[p.id], p); 
+});
+
+socket.on('playerDisconnected', id => { delete otherPlayers[id]; });
+
+socket.on('hpUpdate', data => {
+    if(data.id === socket.id) player.hp = data.hp;
+    else if(otherPlayers[data.id]) otherPlayers[data.id].hp = data.hp;
+});
+
+socket.on('playerRespawn', data => {
+    if(data.id === socket.id) {
+        Object.assign(player, data);
+        console.log("你复活了！");
+    } else if(otherPlayers[data.id]) {
+        Object.assign(otherPlayers[data.id], data);
+    }
+});
+
+socket.on('enemyDunked', data => {
+    effects.push({ x: data.x, y: data.y, life: 30 });
+});
+
+// --- 控制 ---
 const keys = {};
 window.onkeydown = e => {
     keys[e.key.toLowerCase()] = true;
@@ -70,61 +87,85 @@ canvas.onmousemove = e => {
 };
 
 function startDunk() {
-    player.isJumping = true; player.superCharge = 0; player.jumpProgress = 0;
+    player.isJumping = true;
+    player.superCharge = 0;
+    player.jumpProgress = 0;
     player.jumpStart = { x: player.x, y: player.y };
     const tx = mousePos.x + camera.x, ty = mousePos.y + camera.y;
-    const dist = Math.min(Math.hypot(tx-player.x, ty-player.y), 400);
-    const angle = Math.atan2(ty-player.y, tx-player.x);
+    const angle = Math.atan2(ty - player.y, tx - player.x);
+    const dist = Math.min(Math.hypot(tx - player.x, ty - player.y), 400);
     player.jumpTarget = { x: player.x + Math.cos(angle)*dist, y: player.y + Math.sin(angle)*dist };
 }
 
 function update() {
     if (!player.id) return;
     
+    // 移动逻辑
     if (!player.isJumping) {
-        if (keys['w']) player.y -= player.speed; if (keys['s']) player.y += player.speed;
-        if (keys['a']) player.x -= player.speed; if (keys['d']) player.x += player.speed;
+        if (keys['w']) player.y -= player.speed;
+        if (keys['s']) player.y += player.speed;
+        if (keys['a']) player.x -= player.speed;
+        if (keys['d']) player.x += player.speed;
     } else {
-        player.jumpProgress += 0.03;
+        // 跳跃逻辑
+        player.jumpProgress += 0.04;
         player.x = player.jumpStart.x + (player.jumpTarget.x - player.jumpStart.x) * player.jumpProgress;
         player.y = player.jumpStart.y + (player.jumpTarget.y - player.jumpStart.y) * player.jumpProgress;
-        player.z = 4 * 200 * player.jumpProgress * (1 - player.jumpProgress);
+        player.z = Math.sin(player.jumpProgress * Math.PI) * 200; // 抛物线高度
+        
         if (player.jumpProgress >= 1) {
-            player.isJumping = false; player.z = 0;
-            socket.emit('dunkImpact', { x: player.x+25, y: player.y+25 });
-            effects.push({ x: player.x+25, y: player.y+25, life: 30 });
+            player.isJumping = false; 
+            player.z = 0; 
+            player.superCharge = 100; // 测试用：落地即回满
+            socket.emit('dunkImpact', { x: player.x + 25, y: player.y + 25 });
+            effects.push({ x: player.x + 25, y: player.y + 25, life: 30 });
         }
     }
-    
+
+    // 同步位置到服务器
     socket.emit('playerMovement', { x: player.x, y: player.y, z: player.z });
-    camera.x = player.x - canvas.width/2; camera.y = player.y - canvas.height/2;
+    
+    // 摄像机跟随
+    camera.x = player.x - canvas.width/2;
+    camera.y = player.y - canvas.height/2;
+    
+    // UI 更新
     superBarEl.style.width = player.superCharge + '%';
-    effects.forEach((e, i) => { e.life--; if(e.life<=0) effects.splice(i,1); });
+    effects.forEach((e, i) => { if(--e.life <= 0) effects.splice(i, 1); });
+}
+
+function drawPlayer(p, color) {
+    // 阴影
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath(); ctx.ellipse(p.x+25, p.y+45, 20, 10, 0, 0, Math.PI*2); ctx.fill();
+    
+    // 角色
+    ctx.fillStyle = color;
+    ctx.fillRect(p.x, p.y - p.z, 50, 50);
+    
+    // 血条
+    ctx.fillStyle = "#333"; ctx.fillRect(p.x, p.y - p.z - 15, 50, 6);
+    ctx.fillStyle = p.hp > 30 ? "#2ecc71" : "#e74c3c";
+    ctx.fillRect(p.x, p.y - p.z - 15, (p.hp/100)*50, 6);
 }
 
 function draw() {
-    ctx.clearRect(0,0,1000,600);
-    ctx.save(); ctx.translate(-camera.x, -camera.y);
-
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(-camera.x, -camera.y);
+    
     // 画别人
-    Object.values(otherPlayers).forEach(p => {
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
-        ctx.beginPath(); ctx.ellipse(p.x+25, p.y+45, 20, 10, 0, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = "red"; ctx.fillRect(p.x, p.y - p.z, 50, 50);
-    });
-
+    Object.values(otherPlayers).forEach(p => drawPlayer(p, "#e74c3c"));
     // 画自己
-    ctx.fillStyle = "rgba(0,0,0,0.2)";
-    ctx.beginPath(); ctx.ellipse(player.x+25, player.y+45, 20, 10, 0, 0, Math.PI*2); ctx.fill();
-    if(playerImg.complete) ctx.drawImage(playerImg, player.x, player.y - player.z, 50, 50);
-    else { ctx.fillStyle = "blue"; ctx.fillRect(player.x, player.y - player.z, 50, 50); }
-
-    // 画大招特效
+    drawPlayer(player, "#3498db");
+    
+    // 画特效
     effects.forEach(e => {
-        ctx.strokeStyle = `rgba(255,165,0,${e.life/30})`; ctx.lineWidth = 5;
-        ctx.beginPath(); ctx.arc(e.x, e.y, (1-e.life/30)*150, 0, Math.PI*2); ctx.stroke();
+        ctx.strokeStyle = `rgba(255,165,0,${e.life/30})`;
+        ctx.lineWidth = 5; ctx.beginPath();
+        ctx.arc(e.x, e.y, (1 - e.life/30) * 150, 0, Math.PI*2); ctx.stroke();
     });
-
+    
     ctx.restore();
 }
 
